@@ -180,6 +180,11 @@ with st.form("gorev_sil_form"):
             df = df[df["ID"] != secilen_id].reset_index(drop=True)
             df.to_csv(DOSYA_ADI, index=False)
             st.success(f"✅ Görev silindi.")
+            st.rerun()
     else:
         st.info("Silinecek görev yok.")
         st.form_submit_button("Sil", disabled=True)
+        
+        
+        
+
