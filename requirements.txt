@@ -3,3 +3,4 @@ pandas
 streamlit-aggrid
 matplotlib
 streamlit-calendar
+xlsxwriter
