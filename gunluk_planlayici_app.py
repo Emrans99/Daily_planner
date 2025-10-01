@@ -275,6 +275,30 @@ else:
 
 #----------------------------------------Sidebar Görev Detayları Sonu----------------------------------------
 
+#----------------------------------------Görevleri Excel olarak indir----------------------------------------
+import io
+
+st.markdown("---")
+st.subheader("💾 Görevleri Excel Olarak İndir")
+
+# Excel’e yazdırmak için BytesIO
+def to_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Görevler')
+    processed_data = output.getvalue()
+    return processed_data
+
+excel_data = to_excel(df)
+
+st.download_button(
+    label="📥 Excel Olarak İndir",
+    data=excel_data,
+    file_name="gorevler.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+#----------------------------------------Görevleri Excel olarak indir Sonu----------------------------------------
+
         
         
         
