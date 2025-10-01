@@ -1,0 +1,8 @@
+Date: 2025-09-30
+Work hours: 09:00 - 17:30 (lunch 12:30-13:30)
+Total minutes available: 450 min
+Total planned minutes (sum of allocated blocks): 60 min
+Unscheduled tasks count: 0
+
+Top tasks by allocated minutes:
+ - Maillere dön: 60 min
