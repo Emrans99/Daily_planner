@@ -49,6 +49,7 @@ with st.form("gorev_ekle", clear_on_submit=True):
         df = pd.concat([df, yeni], ignore_index=True)
         df.to_csv(DOSYA_ADI, index=False)
         st.success("Görev eklendi ✅")
+        st.rerun()
 
 # Sidebar filtreleme ve sıralama
 st.sidebar.header("Filtreleme ve Sıralama")
@@ -184,6 +185,96 @@ with st.form("gorev_sil_form"):
     else:
         st.info("Silinecek görev yok.")
         st.form_submit_button("Sil", disabled=True)
+
+        #----------------------------------------silme Bölümü Sonu----------------------------------------
+
+#----------------------------------------Takvim Görselleştirme----------------------------------------
+import calendar
+import streamlit as st
+from datetime import datetime
+import pandas as pd
+
+st.markdown("---")
+st.subheader("📅 Görev Takvimi")
+
+# Takvim üstünde ay ve yıl seçici
+col1, col2 = st.columns(2)
+with col1:
+    current_year = datetime.now().year
+    secilen_yil = st.selectbox("Yıl", list(range(current_year - 1, current_year + 5)), index=1)
+with col2:
+    current_month = datetime.now().month
+    secilen_ay = st.selectbox("Ay", list(range(1, 13)), index=current_month - 1)
+
+# Ayın takvimini al
+cal = calendar.Calendar(firstweekday=0)  # Pazartesi = 0
+ay_gunleri = cal.monthdayscalendar(secilen_yil, secilen_ay)
+
+# Görevleri ilgili günlere dağıt
+gorevler_ay = {}
+for _, row in df.iterrows():
+    try:
+        tarih = pd.to_datetime(row["Bitiş Tarihi"])
+        if tarih.year == secilen_yil and tarih.month == secilen_ay:
+            gun = tarih.day
+            if gun not in gorevler_ay:
+                gorevler_ay[gun] = []
+            if pd.notna(row["Görev"]) and row["Görev"] != "":
+                gorevler_ay[gun].append(row["Görev"])
+    except:
+        continue
+
+# Takvim tablo olarak gösterimi
+st.markdown("<style>td{vertical-align: top;}</style>", unsafe_allow_html=True)
+html = "<table border='1' style='border-collapse: collapse; width: 100%; text-align: left;'>"
+html += "<tr>"
+for gun_adi in ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]:
+    html += f"<th style='padding:5px'>{gun_adi}</th>"
+html += "</tr>"
+
+for hafta in ay_gunleri:
+    html += "<tr>"
+    for gun in hafta:
+        if gun == 0:
+            html += "<td style='padding:5px; height:80px'></td>"
+        else:
+            html += f"<td style='padding:5px; height:80px; vertical-align:top; font-size:12px;'>"
+            html += f"<b>{gun}</b><br>"
+            if gun in gorevler_ay:
+                for gorev in gorevler_ay[gun]:
+                    html += f"• {gorev}<br>"
+            html += "</td>"
+    html += "</tr>"
+html += "</table>"
+
+st.markdown(html, unsafe_allow_html=True)
+
+
+#----------------------------------------Takvim Görselleştirme Sonu----------------------------------------
+
+#----------------------------------------Sidebar Görev Detayları----------------------------------------
+st.sidebar.markdown("---")
+st.sidebar.subheader("📋 Görev Detayları")
+
+# Tarih seçimi için sidebar date_input
+secili_tarih_sidebar = st.sidebar.date_input("Gün seçin", key="detay_tarih")
+
+# Seçilen tarihe ait görevleri filtrele
+detay_df_sidebar = df[pd.to_datetime(df["Bitiş Tarihi"]).dt.date == secili_tarih_sidebar]
+
+if not detay_df_sidebar.empty:
+    for idx, row in detay_df_sidebar.iterrows():
+        st.sidebar.markdown(f"**Görev:** {row['Görev']}")
+        st.sidebar.markdown(f"**Öncelik:** {row['Öncelik']}")
+        st.sidebar.markdown(f"**Bitiş Tarihi:** {row['Bitiş Tarihi']}")
+        st.sidebar.markdown(f"**Tamamlandı:** {'✅' if row['Tamamlandı'] else '❌'}")
+        st.sidebar.markdown(f"**Not:** {row['Not']}")
+        st.sidebar.markdown("---")
+else:
+    st.sidebar.info("Bu tarihe ait görev bulunmuyor.")
+
+#----------------------------------------Sidebar Görev Detayları Sonu----------------------------------------
+
         
         
         
