@@ -3,6 +3,246 @@ import pandas as pd
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 import os
 from datetime import datetime
+import json
+import hashlib
+
+# ==============================================================
+# 🔐 ZORUNLU GİRİŞ / KAYIT SİSTEMİ + E-POSTA DOĞRULAMA + ŞİFRE SIFIRLAMA
+# ==============================================================
+
+import random
+import smtplib
+from email.message import EmailMessage
+
+# --------------------------------------------------------------
+# ✉️ E-posta gönderim ayarları
+# --------------------------------------------------------------
+EMAIL_ADDRESS = "gunlukplanlayici@gmail.com"  # Gmail adresin
+EMAIL_PASSWORD = "nklofygdcgnsqkde"           # Google uygulama şifresi (16 haneli)
+
+def send_email(to_email, code):
+    """Gmail SMTP ile 6 haneli doğrulama kodu gönderir"""
+    subject = "📧 Günlük Planlayıcı Doğrulama Kodunuz"
+    body = f"Merhaba,\n\nGünlük Planlayıcı hesabınızı oluşturmak için aşağıdaki 6 haneli kodu girin:\n\n{code}\n\nKod 5 dakika boyunca geçerlidir."
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_ADDRESS
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    try:
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+            smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+            smtp.send_message(msg)
+    except Exception as e:
+        st.error(f"E-posta gönderilemedi: {e}")
+
+# --------------------------------------------------------------
+# 🔹 Kullanıcı sistemi
+# --------------------------------------------------------------
+USERS_FILE = "users.json"
+
+if not os.path.exists(USERS_FILE):
+    with open(USERS_FILE, "w") as f:
+        json.dump({}, f)
+
+def hash_password(password):
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def load_users():
+    with open(USERS_FILE, "r") as f:
+        return json.load(f)
+
+def save_users(users):
+    with open(USERS_FILE, "w") as f:
+        json.dump(users, f, indent=4)
+
+# --------------------------------------------------------------
+# 🔹 Session durumu
+# --------------------------------------------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+if "current_user" not in st.session_state:
+    st.session_state.current_user = None
+if "awaiting_verification" not in st.session_state:
+    st.session_state.awaiting_verification = False
+if "awaiting_password_reset" not in st.session_state:
+    st.session_state.awaiting_password_reset = False
+if "awaiting_password_verification" not in st.session_state:
+    st.session_state.awaiting_password_verification = False
+
+# --------------------------------------------------------------
+# 🔹 Giriş / Kayıt ekranı
+# --------------------------------------------------------------
+if not st.session_state.logged_in:
+
+    st.set_page_config(page_title="Günlük Planlayıcı", page_icon="🗓", layout="centered")
+
+    st.markdown("""
+        <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        .block-container {
+            max-width: 500px;
+            padding-top: 80px;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    st.title("🗓 Günlük Planlayıcı")
+    st.markdown("### Lütfen giriş yap veya kayıt ol")
+
+    users = load_users()
+
+    # ---------------- E-posta doğrulama ekranı ----------------
+    if st.session_state.awaiting_verification:
+        st.info(f"📩 {st.session_state.temp_user['email']} adresine gönderilen 6 haneli kodu gir:")
+        user_code = st.text_input("Doğrulama Kodu")
+        if st.button("Doğrula"):
+            if user_code == st.session_state.verification_code:
+                # Kaydı tamamla
+                user_info = st.session_state.temp_user
+                users[user_info["username"]] = {
+                    "password": user_info["password"],
+                    "email": user_info["email"],
+                    "tasks": []
+                }
+                save_users(users)
+                st.success("✅ E-posta doğrulandı! Kayıt tamamlandı, artık giriş yapabilirsiniz.")
+                # Session temizle
+                del st.session_state.verification_code
+                del st.session_state.temp_user
+                st.session_state.awaiting_verification = False
+                st.rerun()
+            else:
+                st.error("❌ Hatalı kod, lütfen tekrar deneyin.")
+
+    # ---------------- Şifremi unuttum ekranı ----------------
+    elif st.session_state.awaiting_password_reset:
+        st.info("📧 Kayıtlı e-postanı gir ve şifre sıfırlama kodu al.")
+        reset_email = st.text_input("E-posta")
+        if st.button("Kod Gönder"):
+            for user, info in users.items():
+                if info.get("email") == reset_email:
+                    code = str(random.randint(100000, 999999))
+                    st.session_state.reset_code = code
+                    st.session_state.reset_user = user
+                    send_email(reset_email, code)
+                    st.session_state.awaiting_password_reset = False
+                    st.session_state.awaiting_password_verification = True
+                    st.success("📩 Şifre sıfırlama kodu gönderildi! Kod 5 dakika geçerlidir.")
+                    st.rerun()
+                    break
+            else:
+                st.error("❌ Bu e-postaya kayıtlı kullanıcı bulunamadı.")
+
+    # ---------------- Şifre doğrulama ekranı ----------------
+    elif st.session_state.awaiting_password_verification:
+        st.info("📧 E-postana gönderilen 6 haneli kodu gir ve yeni şifre belirle.")
+        user_code = st.text_input("Doğrulama Kodu")
+        new_password = st.text_input("Yeni Şifre", type="password")
+        confirm_password = st.text_input("Yeni Şifre (Tekrar)", type="password")
+        if st.button("Şifreyi Sıfırla"):
+            if user_code == st.session_state.reset_code:
+                if new_password != confirm_password:
+                    st.error("❌ Şifreler eşleşmiyor.")
+                elif new_password == "":
+                    st.error("❌ Yeni şifre boş olamaz.")
+                else:
+                    users[st.session_state.reset_user]["password"] = hash_password(new_password)
+                    save_users(users)
+                    st.success("✅ Şifre başarıyla değiştirildi! Şimdi giriş yapabilirsin.")
+                    # Session temizle
+                    st.session_state.pop("reset_code")
+                    st.session_state.pop("reset_user")
+                    st.session_state.awaiting_password_verification = False
+                    st.rerun()
+            else:
+                st.error("❌ Kod hatalı, tekrar deneyin.")
+
+    # ---------------- Giriş / Kayıt seçim ekranı ----------------
+    else:
+        secim = st.radio("Ne yapmak istiyorsun?", ["Giriş Yap", "Kayıt Ol"], horizontal=True)
+
+        # ---------------- Giriş ----------------
+        if secim == "Giriş Yap":
+            username = st.text_input("Kullanıcı Adı")
+            password = st.text_input("Şifre", type="password")
+
+            if st.button("Giriş Yap"):
+                if username in users and users[username]["password"] == hash_password(password):
+                    st.session_state.logged_in = True
+                    st.session_state.current_user = username
+                    st.success(f"👋 Hoş geldin, {username}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Kullanıcı adı veya şifre hatalı!")
+
+            if st.button("Şifremi Unuttum"):
+                st.session_state.awaiting_password_reset = True
+                st.rerun()
+
+        # ---------------- Kayıt ----------------
+        elif secim == "Kayıt Ol":
+            new_username = st.text_input("Yeni Kullanıcı Adı")
+            new_email = st.text_input("E-posta")
+            new_password = st.text_input("Şifre", type="password")
+            confirm_password = st.text_input("Şifre (Tekrar)", type="password")
+
+            if st.button("Kayıt Ol"):
+                if new_username in users:
+                    st.warning("⚠️ Bu kullanıcı adı zaten alınmış.")
+                elif new_password != confirm_password:
+                    st.error("❌ Şifreler eşleşmiyor.")
+                elif new_username == "" or new_password == "" or new_email == "":
+                    st.error("❌ Lütfen tüm alanları doldur.")
+                else:
+                    code = str(random.randint(100000, 999999))
+                    st.session_state.verification_code = code
+                    st.session_state.temp_user = {
+                        "username": new_username,
+                        "password": hash_password(new_password),
+                        "email": new_email
+                    }
+                    send_email(new_email, code)
+                    st.session_state.awaiting_verification = True
+                    st.success("📩 E-posta doğrulama kodu gönderildi!")
+                    st.rerun()
+
+    st.stop()  # Giriş yapılmadıysa uygulama devam etmez
+
+# --------------------------------------------------------------
+# 🔹 Giriş sonrası ana ekran
+# --------------------------------------------------------------
+st.sidebar.success(f"👤 Aktif kullanıcı: {st.session_state.current_user}")
+
+users = load_users()
+current_user = st.session_state.current_user
+
+if "tasks" not in users[current_user]:
+    users[current_user]["tasks"] = []
+    save_users(users)
+
+user_tasks = users[current_user]["tasks"]
+df = pd.DataFrame(user_tasks, columns=["Görev", "Açıklama", "Bitiş Tarihi", "Durum"])
+
+def save_user_tasks():
+    users = load_users()
+    users[current_user]["tasks"] = df.to_dict(orient="records")
+    save_users(users)
+
+if st.sidebar.button("🚪 Çıkış Yap"):
+    st.session_state.logged_in = False
+    st.session_state.current_user = None
+    st.rerun()
+
+
+# --------------------------------------------------------------
+# ⚙️ BURADAN SONRA GRİD, TAKVİM, EXCEL vb. GELECEK
+# --------------------------------------------------------------
+
 
 # Dosya adı
 DOSYA_ADI = "gorevler.csv"
@@ -157,6 +397,10 @@ grid_response = AgGrid(
     fit_columns_on_grid_load=True
 )
 
+
+
+
+
 # Grid’de yapılan değişiklikleri orijinal df’ye yansıt
 updated_df = pd.DataFrame(grid_response['data'])
 for idx, row in updated_df.iterrows():
@@ -298,8 +542,65 @@ st.download_button(
     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 #----------------------------------------Görevleri Excel olarak indir Sonu----------------------------------------
+# ---------------- Hatırlatıcı ----------------
+st.sidebar.markdown("### ⏰ Görev Hatırlatıcı")
 
-        
-        
+# Görevleri seçmek için dropdown
+if len(df) > 0:
+    selected_task_index = st.sidebar.selectbox("Hatırlatma ayarla:", range(len(df)), format_func=lambda i: df.iloc[i]["Görev"])
+    reminder_minutes = st.sidebar.number_input(
+        "Kaç dakika önce hatırlatma gönderilsin?", min_value=1, value=30, step=1
+    )
+
+    if st.sidebar.button("Hatırlatıcıyı Ayarla"):
+        task = df.iloc[selected_task_index]
+        deadline_str = task["Bitiş Tarihi"]
+
+        # Bitiş tarihi stringini datetime objesine çevir
+        try:
+            deadline = pd.to_datetime(deadline_str)
+            now = pd.Timestamp.now()
+            reminder_time = deadline - pd.Timedelta(minutes=reminder_minutes)
+
+            # Eğer reminder zamanı geçmişse uyar
+            if reminder_time <= now:
+                st.warning("⚠️ Hatırlatma zamanı geçmiş! Farklı bir dakika girin.")
+            else:
+                # Hatırlatma ayarla
+                st.success(f"✅ '{task['Görev']}' için hatırlatma ayarlandı ({reminder_minutes} dakika önce).")
+
+                # Burada mail gönderme işini zaman kontrolüyle yapıyoruz
+                import time
+                import threading
+
+                def send_reminder_later(email, task_name, send_time):
+                    while True:
+                        now = pd.Timestamp.now()
+                        if now >= send_time:
+                            subject = f"Hatırlatma: {task_name}"
+                            body = f"Merhaba!\n\n'{task_name}' adlı görevinizin bitişine {reminder_minutes} dakika kaldı. İyi çalışmalar!"
+                            msg = EmailMessage()
+                            msg["Subject"] = subject
+                            msg["From"] = EMAIL_ADDRESS
+                            msg["To"] = email
+                            msg.set_content(body)
+                            try:
+                                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtp:
+                                    smtp.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
+                                    smtp.send_message(msg)
+                                st.info(f"📩 '{task_name}' için hatırlatma maili gönderildi.")
+                            except Exception as e:
+                                st.error(f"Hatırlatma gönderilemedi: {e}")
+                            break
+                        time.sleep(30)  # 30 saniyede bir kontrol
+
+                # Thread ile arka planda çalıştır
+                threading.Thread(target=send_reminder_later, args=(users[current_user]["email"], task["Görev"], reminder_time), daemon=True).start()
+
+        except Exception as e:
+            st.error("❌ Bitiş tarihi formatı hatalı. Lütfen 'YYYY-MM-DD HH:MM' formatında girin.")
+else:
+    st.sidebar.info("📌 Önce görev ekleyin.")
+
         
 
